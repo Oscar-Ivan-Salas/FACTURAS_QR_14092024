@@ -1,0 +1,148 @@
+import cv2
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel, QPushButton, QLineEdit, QHBoxLayout, QScrollArea, QFrame, QSizePolicy
+from PyQt5.QtGui import QImage, QPixmap
+from PyQt5.QtCore import QTimer, Qt
+import numpy as np
+
+class VentanaEscaneoQR(QWidget):
+    """
+    Ventana para el escaneo de códigos QR.
+    
+    Funcionalidades:
+    - Escaneo de códigos QR usando la webcam.
+    - Detección automática y extracción de datos del código QR.
+    - Llenado automático del formulario con los datos extraídos.
+    - Posibilidad de guardar los datos en la base de datos.
+    """
+    
+    def __init__(self, db):
+        super().__init__()
+        self.db = db
+        self.init_ui()
+        self.cap = None  # Variable para la webcam
+
+    def init_ui(self):
+        """
+        Configura la interfaz de usuario de la ventana de escaneo QR.
+        """
+        self.setWindowTitle("Escaneo de Facturas QR")
+        self.setGeometry(100, 100, 1000, 800)  # Dimensiones de la ventana
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+
+        # Layout principal
+        layout_principal = QHBoxLayout(self)
+
+        # Parte izquierda: formulario de datos
+        self.formulario_layout = QVBoxLayout()
+
+        self.campos = {}
+        campos_nombres = [
+            "RUC Emisor", "Tipo Comprobante", "Serie", "Numeración",
+            "Monto Total", "Fecha Emisión", "Monto IGV", "RUC Adquiriente",
+            "Razón Social Emisor", "Razón Social Adquiriente",
+            "Valor Venta Gravada", "Valor Venta Inafecta",
+            "Valor Venta Exonerada", "Código Hash"
+        ]
+
+        for nombre in campos_nombres:
+            label = QLabel(nombre)
+            label.setStyleSheet("font-size: 14px;")
+            campo = QLineEdit()
+            campo.setReadOnly(True)
+            self.formulario_layout.addWidget(label)
+            self.formulario_layout.addWidget(campo)
+            self.campos[nombre] = campo
+
+        # Scroll area para el formulario
+        self.scroll_area_formulario = QScrollArea()
+        self.scroll_area_formulario.setWidgetResizable(True)
+        self.scroll_widget_formulario = QWidget()
+        self.scroll_widget_formulario.setLayout(self.formulario_layout)
+        self.scroll_area_formulario.setWidget(self.scroll_widget_formulario)
+
+        # Botón para guardar los datos
+        self.boton_guardar = QPushButton("Guardar")
+        self.boton_guardar.clicked.connect(self.guardar_datos)
+        self.formulario_layout.addWidget(self.boton_guardar)
+
+        layout_principal.addWidget(self.scroll_area_formulario, 1)
+
+        # Parte derecha: vista de la webcam
+        self.webcam_frame = QFrame()
+        self.webcam_layout = QVBoxLayout()
+        self.label_webcam = QLabel("Vista de la Webcam")
+        self.label_webcam.setAlignment(Qt.AlignCenter)
+        self.webcam_layout.addWidget(self.label_webcam)
+
+        # Botón para iniciar la webcam
+        self.boton_iniciar_webcam = QPushButton("Iniciar Webcam")
+        self.boton_iniciar_webcam.clicked.connect(self.iniciar_webcam)
+        self.webcam_layout.addWidget(self.boton_iniciar_webcam)
+        
+        self.webcam_frame.setLayout(self.webcam_layout)
+        layout_principal.addWidget(self.webcam_frame, 2)
+
+        self.timer = QTimer()
+        self.timer.timeout.connect(self.mostrar_frame)
+
+    def iniciar_webcam(self):
+        """
+        Inicia la webcam para escanear códigos QR.
+        """
+        self.cap = cv2.VideoCapture(0)
+        self.timer.start(20)
+
+    def mostrar_frame(self):
+        """
+        Muestra el frame de la webcam y detecta códigos QR.
+        """
+        ret, frame = self.cap.read()
+        if ret:
+            qr_detector = cv2.QRCodeDetector()
+            data, points, _ = qr_detector.detectAndDecode(frame)
+            
+            if points is not None:
+                pts = np.array(points, dtype=np.int32)
+                pts = pts.reshape((-1, 1, 2))
+                frame = cv2.polylines(frame, [pts], True, (0, 255, 0), 2)
+                
+                if data:
+                    self.procesar_datos_qr(data)
+
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            h, w, ch = frame_rgb.shape
+            bytes_per_line = ch * w
+            qt_image = QImage(frame_rgb.data, w, h, bytes_per_line, QImage.Format_RGB888)
+            self.label_webcam.setPixmap(QPixmap.fromImage(qt_image))
+
+    def procesar_datos_qr(self, data):
+        """
+        Procesa los datos extraídos del código QR.
+        """
+        datos = data.split('|')
+        if len(datos) >= 14:
+            keys = list(self.campos.keys())
+            for i in range(14):
+                self.campos[keys[i]].setText(datos[i])
+
+    def guardar_datos(self):
+        """
+        Lógica para guardar los datos extraídos.
+        """
+        pass
+
+    def cerrar_webcam(self):
+        """
+        Libera la webcam y detiene el temporizador.
+        """
+        if self.cap:
+            self.cap.release()
+            self.timer.stop()
+
+    def closeEvent(self, event):
+        """
+        Evento al cerrar la ventana.
+        """
+        self.cerrar_webcam()
+        super().closeEvent(event)
+
